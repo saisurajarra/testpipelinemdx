@@ -1,0 +1,52 @@
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: devcoe-pwp-build-pipeline-template
+  labels:
+    devcoe-pipeline-type: build
+spec:
+  params:
+    - name: gitrevision
+    - name: gitrepositoryurl
+    - name: gitprojectname
+    - name: gitreponame
+    - name: gituser
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        annotations:
+          tekton.dev/displayName: PwpBuild
+          tekton.dev/pipelines.minVersion: 0.17.0
+          tekton.dev/platforms: linux/amd64
+          tekton.dev/tags: image-build
+        labels:
+          app.kubernetes.io/version: "1.0"
+          tekton.dev/pipeline: pwp-build
+        generateName: pwp-build-
+      spec:
+        params:
+          - name: SOURCE_REPO
+            value: $(tt.params.gitrepositoryurl)
+          - name: SOURCE_REFERENCE
+            value: $(tt.params.gitrevision)
+          - name: SOURCE_USER
+            value: $(tt.params.gituser)
+          - name: TRIGGER_TYPE
+            value: "push"
+        pipelineRef:
+          name: pwp-build
+        serviceAccountName: pipeline
+        timeout: 1h0m0s
+        workspaces:
+          - name: build-dir
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteMany
+                resources:
+                  requests:
+                    storage: 1Gi
+                storageClassName: ocs-storagecluster-cephfs
+                volumeMode: Filesystem
