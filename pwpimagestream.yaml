@@ -1,0 +1,54 @@
+kind: ImageStream
+apiVersion: image.openshift.io/v1
+metadata:
+  name: pwp-builder
+spec:
+  lookupPolicy:
+    local: true
+  referece:
+---
+kind: ImageStreamTag
+apiVersion: image.openshift.io/v1
+metadata:
+  name: pwp-builder:7.4-ubi8
+  annotations:
+    argocd.argoproj.io/sync-options: Validate=false
+tag:
+  name: 7.4-ubi8
+  from:
+    kind: DockerImage
+    name: image-registry.openshift-image-registry.svc:5000/devcoe-ocp-pipelines/pwp-builder:7.4-ubi8
+  importPolicy:
+    scheduled: true
+  referencePolicy:
+    type: Local
+lookupPolicy:
+  local: true
+
+---
+kind: ImageStream
+apiVersion: image.openshift.io/v1
+metadata:
+  name: ubi8-php-74
+spec:
+  lookupPolicy:
+    local: true
+  referece:
+---
+kind: ImageStreamTag
+apiVersion: image.openshift.io/v1
+metadata:
+  name: ubi8-php-74:latest
+  annotations:
+    argocd.argoproj.io/sync-options: Validate=false
+tag:
+  name: latest
+  from:
+    kind: DockerImage
+    name: image-registry.openshift-image-registry.svc:5000/openshift/php:7.4-ubi8
+  importPolicy:
+    scheduled: true
+  referencePolicy:
+    type: Local
+lookupPolicy:
+  local: true
