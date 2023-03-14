@@ -1,0 +1,122 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: pwp-build
+  labels:
+    app.kubernetes.io/version: "1.0"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.17.0"
+    tekton.dev/tags: image-build
+    tekton.dev/displayName: "PwpBuild"
+    tekton.dev/platforms: "linux/amd64"
+spec:
+  description: >-
+    Tekton Pipeline to replace JavaMavenPipelinev2 Jenkins pipeline
+  workspaces:
+    - name: build-dir
+      description: Location where source is stored.
+  params:
+    - name: SOURCE_REPO
+      description: A git repo url where the source code resides.
+    - name: SOURCE_REFERENCE
+      description: The branch, tag or SHA to checkout.
+    - name: SOURCE_USER
+      description: Git Username that initiated the event (e.g commit)
+      default: none
+    - name: TRIGGER_TYPE
+      description: The type of Trigger (push, tag, pr, manual)
+    - name: DEBUG
+      description: Enable Debug Output
+      default: "false"
+  results:
+    - description: Application Version
+      name: application-version
+      type: string
+      value: $(tasks.build-preprocess.results.build-values.CPGBUILD_VERSION)
+    - description: Image Tag
+      name: image-tag
+      type: string
+      value: $(tasks.image-build.results.IMAGE_TAG)
+  tasks:
+    - name: fetch-from-git
+      taskRef:
+        name: git-clone
+        kind: ClusterTask
+      params:
+        - name: url
+          value: $(params.SOURCE_REPO)
+        - name: revision
+          value: $(params.SOURCE_REFERENCE)
+      workspaces:
+        - name: output
+          workspace: build-dir
+    - name: build-preprocess
+      runAfter:
+        - fetch-from-git
+      taskRef:
+        name: devcoe-build-preprocess
+        kind: Task
+      params:
+        - name: SOURCE_REFERENCE
+          value: "$(params.SOURCE_REFERENCE)"
+        - name: APP_BUILD_TYPE
+          value: "pwp"
+        - name: DEBUG
+          value: $(params.DEBUG)
+        - name: SOURCE_USER
+          value: $(params.SOURCE_USER)
+      workspaces:
+        - name: build-dir
+          workspace: build-dir
+    - name: pwp-build-test
+      runAfter:
+        - build-preprocess
+      taskRef:
+        name: devcoe-pwp
+        kind: Task
+      workspaces:
+        - name: build-dir
+          workspace: build-dir
+      params:
+        - name: PWP_IMAGE
+          value: $(tasks.build-preprocess.results.base-image)
+        - name: CPGBUILD_PHP_UNITTEST_LIST
+          value: $(tasks.build-preprocess.results.build-values.CPGBUILD_PHP_UNITTEST_LIST)
+        - name: CPGBUILD_VERSION
+          value: $(tasks.build-preprocess.results.build-values.CPGBUILD_VERSION)
+        - name: BRANCH
+          value: $(tasks.build-preprocess.results.branch-type)
+        - name: application-name
+          value: $(tasks.build-preprocess.results.application-name)
+    - name: image-build
+      runAfter:
+        - pwp-build-test
+      taskRef:
+        name: devcoe-php-s2i
+        kind: Task
+      workspaces:
+        - name: build-dir
+          workspace: build-dir
+      params:
+        - name: PWP_IMAGE
+          value: $(tasks.build-preprocess.results.base-image)
+        - name: IMAGE_REGISTRY
+          value: devtools.cpggpc.ca:8151
+        - name: ORGANIZATION
+          value: $(tasks.build-preprocess.results.organization)
+        - name: PRODUCT
+          value: $(tasks.build-preprocess.results.product)
+        - name: APPLICATION_NAME
+          value: $(tasks.build-preprocess.results.application-name)
+        - name: BRANCH
+          value: $(tasks.build-preprocess.results.branch-type)
+        - name: COMMIT
+          value: $(tasks.fetch-from-git.results.commit)
+        - name: BUILD
+          value: $(context.pipelineRun.name)
+        - name: APP_ARTIFACT_URL
+          value: TODOURL
+        - name: image-build-path
+          value: $(tasks.pwp-build-test.results.image-build-path)
+        - name: CPGBUILD_VERSION
+          value: $(tasks.build-preprocess.results.build-values.CPGBUILD_VERSION)
