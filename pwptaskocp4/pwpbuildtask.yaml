@@ -1,0 +1,139 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/pipelines.minVersion: 0.12.1
+    tekton.dev/tags: build-tool
+  labels:
+    app.kubernetes.io/version: "0.2"
+  name: devcoe-pwp
+spec:
+  description: This Task can be used to run a Pwp build.
+  params:
+    - default: image-registry.openshift-image-registry.svc:5000/devcoe-ocp-pipelines/pwp-builder:7.4-ubi8
+      description: pwp base image
+      name: PWP_IMAGE
+      type: string   
+    - name : CPGBUILD_PHP_UNITTEST_LIST
+      description: build unittest list
+    - name: BRANCH
+      type: string
+      description: Branch Type
+    - name: application-name
+      type: string
+      description: application name
+    - name : CPGBUILD_VERSION
+      description: build version 
+  results:
+    - name: sonarphp-coverage-report-paths
+      type: string
+      description: sonar coverage reports
+    - name: sonarphp-file-report-paths
+      type: string
+      description: sonar test reports  
+    - name: image-build-path
+      type: string
+      description: image build path
+      
+  steps:
+    - name: pwp-build-artifact
+      image: image-registry.openshift-image-registry.svc:5000/devcoe-ocp-pipelines/pwp-builder:7.4-ubi8
+      resources: {}
+      env:
+        - name: HOME
+          value: /tekton/home
+      script: |      
+        #!/usr/bin/env sh
+        set -x
+
+        artifactPath="$(workspaces.build-dir.path)"
+        if [ "$(params.BRANCH)" = "release" ] || [ "$(params.BRANCH)" = "hotfix" ]; then
+          artifactPackageName=$(params.application-name)-$(params.CPGBUILD_VERSION).tar.gz
+        else
+          artifactPackageName=$(params.application-name)-$(params.CPGBUILD_VERSION)-SNAPSHOT.tar.gz
+        fi 
+        echo "${artifactPackageName}"
+
+        echo INFO: createTargetFile
+        tar -czvf /tmp/${artifactPackageName} -X ${artifactPath}/.s2iignore -C ${artifactPath} ./
+        if [ ! -d ${artifactPath}/target ]; then
+          mkdir -p ${artifactPath}/target
+        fi        
+        mv /tmp/${artifactPackageName} ${artifactPath}/target/
+        ls -al ${artifactPath}/target/
+
+
+        if [ -d ${artifactPath}/target/buildDir ]; then
+          rm -rf ${artifactPath}/target/buildDir
+        fi
+        mkdir -p ${artifactPath}/target/buildDir
+        tar -xvf ${artifactPath}/target/${artifactPackageName} --directory ${artifactPath}/target/buildDir
+        targetBuildPath="${artifactPath}/target/buildDir"
+
+        echo -n $targetBuildPath | tee $(results.image-build-path.path)
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      workingDir: $(workspaces.build-dir.path)
+    - env:
+        - name: HOME
+          value: /tekton/home  
+      name: pwp-build-test
+      image: image-registry.openshift-image-registry.svc:5000/devcoe-ocp-pipelines/pwp-builder:7.4-ubi8
+      resources: {}
+      script: |      
+        #!/usr/bin/env sh
+
+        coverageReportPaths=""
+        testsReportPath=""
+        reportsBasePath="$(workspaces.build-dir.path)/target/reports"
+        composer update --dev
+        readarray -td, unitTestDirectoryList <<<"$(params.CPGBUILD_PHP_UNITTEST_LIST)"
+
+        if [ ${#unitTestDirectoryList[@]} == 0 ]; then
+          echo "WARNING: No test folders were specified in build.values (CPGBUILD_PHP_UNITTEST_LIST) - not running any unit tests"
+          exit 0
+        fi 
+        if [ ! -d ${reportsBasePath} ]; then
+          mkdir -p ${reportsBasePath}/{coverage-reports,unit-test-reports}
+        fi
+
+        for it in "${unitTestDirectoryList[@]}"
+        do 
+          if [ "${it}" == $'\n' ]; then
+            continue
+          fi
+          if [ -f "${it}/phpunit.xml" ]
+          then
+            echo "Running phpunit.xml tests in folder ${it}"
+            tempPath="${reportsBasePath}/coverage-reports/${it}"
+            testReportName=$(sed 's|/|-|g' <<< "${it}")
+            mkdir -p ${tempPath}
+            coverageReportPaths="${tempPath}/coverage-clover-report.xml,${coverageReportPaths}"
+            testReportFile="${reportsBasePath}/unit-test-reports/${testReportName}-phpunit-report.xml" 
+            vendor/phpunit/phpunit/phpunit --coverage-clover=${tempPath}/coverage-clover-report.xml --log-junit=${testReportFile} -c ${it}/phpunit.xml
+          else
+            echo "WARNING: Test folder ${it} from CPGBUILD_PHP_UNITTEST_LIST does not contain a file named ${it}/phpunit.xml"
+          fi
+        done
+        
+        if ! [ "${coverageReportPaths}" == "" ]; then
+          junit-merge  -o ${reportsBasePath}/phpunit-report-results.xml -d ${reportsBasePath}/unit-test-reports/
+          coverageReportPaths=${coverageReportPaths%?}
+          sonarPhpCoverageReportPaths="-Dsonar.php.coverage.reportPaths=${coverageReportPaths}"
+          sonarPhpTestsReportPath="-Dsonar.php.tests.reportPath=${reportsBasePath}/phpunit-report-results.xml"
+        fi
+
+        echo -n $sonarPhpCoverageReportPaths | tee $(results.sonarphp-coverage-report-paths.path)
+        echo -n $sonarPhpTestsReportPath| tee $(results.sonarphp-file-report-paths.path)
+        # sonarPhpTestsReportPath = "-Dsonar.php.tests.reportPath=${reportsBasePath}/unit-test-reports/public-wp-content-plugins-cpg-ldap-login-phpunit-report.xml "
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      workingDir: $(workspaces.build-dir.path)
+  workspaces:
+    - description: The workspace consisting of pwp project.
+      name: build-dir
+  
+ 
