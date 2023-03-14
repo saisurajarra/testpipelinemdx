@@ -1,0 +1,37 @@
+# OCP-Pipelines
+
+namespace setup (replace xx with initials)
+
+```
+oc new-project devcoe-ocp-pipelines-xx
+./namespacesetup xx
+oc apply -k ./overlays/<pipelinetype>
+```
+
+to run build pipeline
+
+```
+For JavaMaven template
+oc apply -k ./overlays/<pipelinetype>; oc process -f ./tooling/pipelineruntemplate.yaml | oc create -f -
+```
+```
+For pwp template
+oc apply -k ./overlays/<pipelinetype>; oc process -f ./tooling/pwppipelineruntemplate.yaml | oc create -f -
+```
+
+```
+For Mendix template
+oc apply -k ./overlays/<pipelinetype>; oc process -f ./tooling/mdxpipelineruntemplate.yaml | oc create -f -
+```
+
+to run deploy pipeline
+
+```
+oc apply -k ./overlays/<pipelinetype>; oc process -f ./tooling/deploypipelinetemplate.yaml | oc create -f -
+```
+
+to view logs from console (-L means last pipeline run)
+
+```
+tkn pr logs -fL
+```
